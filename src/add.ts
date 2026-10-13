@@ -589,8 +589,6 @@ export interface AddOptions {
   subagent?: string[];
   /** Output results as a JSON array (machine-readable, no ANSI codes). */
   json?: boolean;
-  /** Plugin groups whose skills to install. */
-  group?: string[];
 }
 
 /** One entry per skill in `add --json` output. */
@@ -660,6 +658,9 @@ function logAutoSelectedSkills(entries: Array<{ label: string; description?: str
 function primaryPluginName(skill: Skill): string | undefined {
   return skill.pluginNames?.[0];
 }
+
+/** Group key for skills that belong to no plugin group, shown as "Other". */
+const OTHER_GROUP_KEY = null;
 
 /** Lowercased kebab form, so `Document Skills` (as the prompt shows it) matches `document-skills`. */
 function normalizeGroupName(name: string): string {
@@ -1850,9 +1851,8 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       // Too many rows to see at once: pick groups first, then skills within them.
       // This counts prompt rows, not distinct skills: a skill in two groups
       // takes two rows, and the question is whether the list would fit.
-      // `null` stands for skills that belong to no group ("Other").
-      const groupKeys = [...new Set(entries.map((e) => e.group ?? null))].sort((a, b) =>
-        a === null ? 1 : b === null ? -1 : a.localeCompare(b)
+      const groupKeys = [...new Set(entries.map((e) => e.group ?? OTHER_GROUP_KEY))].sort((a, b) =>
+        a === OTHER_GROUP_KEY ? 1 : b === OTHER_GROUP_KEY ? -1 : a.localeCompare(b)
       );
       const groupsFirst =
         entries.length > SKILL_PROMPT_MAX_VISIBLE &&
@@ -1863,7 +1863,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
           message: 'Which groups?',
           items: groupKeys.map((key) => ({
             value: key,
-            label: key === null ? 'Other' : kebabToTitle(key),
+            label: key === OTHER_GROUP_KEY ? 'Other' : kebabToTitle(key),
           })),
           required: true,
           maxVisible: SKILL_PROMPT_MAX_VISIBLE,
@@ -1875,7 +1875,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         }
 
         const picked = new Set(pickedGroups as (string | null)[]);
-        entries = entries.filter((e) => picked.has(e.group ?? null));
+        entries = entries.filter((e) => picked.has(e.group ?? OTHER_GROUP_KEY));
       }
 
       // Sort entries by plugin name first, then by skill name
