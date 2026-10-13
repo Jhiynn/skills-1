@@ -682,11 +682,17 @@ function findSkillsInGroups(
   return { matched, unknown, available };
 }
 
+/** Error line for requested group names that match no plugin group. */
+function unknownGroupsMessage(unknown: string[]): string {
+  return `Unknown group${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`;
+}
+
 async function handleWellKnownSkills(
   source: string,
   url: string,
   options: AddOptions,
-  spinner: ReturnType<typeof p.spinner>
+  spinner: ReturnType<typeof p.spinner>,
+  exit: (code: number, errorMessage?: string) => never
 ): Promise<boolean> {
   spinner.start('Discovering skills from well-known endpoint...');
 
@@ -738,9 +744,11 @@ async function handleWellKnownSkills(
   }
 
   if (options.group?.length) {
-    p.log.error(`Unknown group: ${options.group.join(', ')}`);
+    // Same reporting as the main path; there is no temp dir to clean up here.
+    const message = unknownGroupsMessage(options.group);
+    p.log.error(message);
     p.log.info('This source defines no plugin groups.');
-    process.exit(1);
+    exit(1, `${message}. Available groups: none`);
   }
 
   // Filter skills if --skill option is provided
@@ -1630,7 +1638,13 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         // feed the JSON accumulator yet.
         emitJsonAndExit(1, '--json is not yet supported for well-known skill sources.');
       }
-      const handled = await handleWellKnownSkills(source, parsed.url, options, spinner);
+      const handled = await handleWellKnownSkills(
+        source,
+        parsed.url,
+        options,
+        spinner,
+        emitJsonAndExit
+      );
       if (handled) return;
       directDownload = true;
     }
@@ -1757,7 +1771,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       if (options.group?.length) {
         const { matched, unknown, available } = findSkillsInGroups(skills, options.group);
         if (unknown.length > 0) {
-          const message = `Unknown group${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`;
+          const message = unknownGroupsMessage(unknown);
           p.log.error(message);
           if (available.length > 0) {
             p.log.info('Available groups:');

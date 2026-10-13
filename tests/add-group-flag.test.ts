@@ -52,6 +52,7 @@ vi.mock('../src/prompts/search-multiselect.ts', async (importActual) => {
 
 import { runAdd, parseAddOptions } from '../src/add.ts';
 import * as installer from '../src/installer.ts';
+import { wellKnownProvider, type WellKnownSkill } from '../src/providers/index.ts';
 import { searchMultiselect } from '../src/prompts/search-multiselect.ts';
 import type { Skill } from '../src/types.ts';
 
@@ -166,5 +167,29 @@ describe('add --group', () => {
         '  - pdf-tools',
       ])
     );
+  });
+
+  it('fails on --group for a well-known source, which defines no groups', async () => {
+    const skill = {
+      name: 'docs',
+      description: 'docs skill',
+      content: '---\nname: docs\ndescription: docs skill\n---\n',
+      installName: 'docs',
+      sourceUrl: 'https://example.com/.well-known/agent-skills/docs/SKILL.md',
+      files: new Map([['SKILL.md', 'x']]),
+      indexEntry: { name: 'docs', description: 'docs skill', files: ['SKILL.md'] },
+    } as WellKnownSkill;
+    vi.spyOn(wellKnownProvider, 'fetchAllSkills').mockResolvedValue([skill]);
+    const install = vi.spyOn(installer, 'installSkillForAgent');
+    const { source, options } = parseAddOptions(['https://example.com', '--group', 'a,b']);
+
+    await expect(
+      runAdd(source, { ...options, agent: ['codex'], global: false, copy: true })
+    ).rejects.toThrow('process.exit called');
+
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(install).not.toHaveBeenCalled();
+    expect(searchMultiselect).not.toHaveBeenCalled();
+    expect(logged).toContain('Unknown groups: a, b');
   });
 });
