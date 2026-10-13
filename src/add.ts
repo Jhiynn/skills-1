@@ -73,6 +73,8 @@ import {
 // Helper to check if a value is a cancel symbol (works with both clack and our custom prompts)
 const isCancelled = (value: unknown): value is symbol => typeof value === 'symbol';
 const EVE_AGENT_LABEL = 'eve agent';
+/** Rows the skill selection prompt shows at once. */
+const SKILL_PROMPT_MAX_VISIBLE = 20;
 
 /**
  * Check if a source identifier (owner/repo format) represents a private GitHub repo.
@@ -587,6 +589,8 @@ export interface AddOptions {
   subagent?: string[];
   /** Output results as a JSON array (machine-readable, no ANSI codes). */
   json?: boolean;
+  /** Plugin groups whose skills to install. */
+  group?: string[];
 }
 
 /** One entry per skill in `add --json` output. */
@@ -795,7 +799,7 @@ async function handleWellKnownSkills(
       items: skillChoices,
       initialSelected: isSkillsShPackUrl(url) ? skills : undefined,
       required: true,
-      maxVisible: 20,
+      maxVisible: SKILL_PROMPT_MAX_VISIBLE,
       selectAll: true,
     });
 
@@ -1827,12 +1831,50 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     } else {
       // One entry per skill and plugin group, so a skill listed by several
       // plugins shows under each; selection stays per skill (same value).
-      const entries = skills.flatMap((skill) =>
+      let entries = skills.flatMap((skill) =>
         (skill.pluginNames?.length ? skill.pluginNames : [undefined]).map((group) => ({
           skill,
           group,
         }))
       );
+
+      const kebabToTitle = (s: string) =>
+        s
+          .split('-')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+
+      // Check if any skills have plugin grouping
+      const hasGroups = entries.some((e) => e.group);
+
+      // Too many rows to see at once: pick groups first, then skills within them.
+      // `null` stands for skills that belong to no group ("Other").
+      const groupKeys = [...new Set(entries.map((e) => e.group ?? null))].sort((a, b) =>
+        a === null ? 1 : b === null ? -1 : a.localeCompare(b)
+      );
+      const groupsFirst =
+        entries.length > SKILL_PROMPT_MAX_VISIBLE &&
+        groupKeys.length >= 2 &&
+        !options.group?.length;
+      if (groupsFirst) {
+        const pickedGroups = await searchMultiselect({
+          message: 'Which groups?',
+          items: groupKeys.map((key) => ({
+            value: key,
+            label: key === null ? 'Other' : kebabToTitle(key),
+          })),
+          required: true,
+          maxVisible: SKILL_PROMPT_MAX_VISIBLE,
+        });
+
+        if (isCancelled(pickedGroups)) {
+          await cleanup(tempDir);
+          exitInstallationCancelled();
+        }
+
+        const picked = new Set(pickedGroups as (string | null)[]);
+        entries = entries.filter((e) => picked.has(e.group ?? null));
+      }
 
       // Sort entries by plugin name first, then by skill name
       entries.sort((a, b) => {
@@ -1843,15 +1885,6 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         }
         return getSkillDisplayName(a.skill).localeCompare(getSkillDisplayName(b.skill));
       });
-
-      // Check if any skills have plugin grouping
-      const hasGroups = entries.some((e) => e.group);
-
-      const kebabToTitle = (s: string) =>
-        s
-          .split('-')
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
 
       const skillChoices = entries.map(({ skill, group }) => ({
         value: skill,
@@ -1865,8 +1898,9 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
           ? `Select skills to install ${pc.dim('(space to toggle)')}`
           : 'Select skills to install',
         items: skillChoices,
+        initialSelected: groupsFirst ? [...new Set(entries.map((e) => e.skill))] : undefined,
         required: true,
-        maxVisible: 20,
+        maxVisible: SKILL_PROMPT_MAX_VISIBLE,
         searchable: !hasGroups,
         showDetail: true,
         showSelectedSummary: false,
