@@ -1749,7 +1749,11 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       }
 
       console.log();
-      p.outro('Use --skill <name> to install specific skills');
+      p.outro(
+        sortedGroups.length > 0
+          ? 'Use --skill <name> or --group <name> to install specific skills or whole groups'
+          : 'Use --skill <name> to install specific skills'
+      );
       await cleanup(tempDir);
       emitJsonAndExit(0);
     }

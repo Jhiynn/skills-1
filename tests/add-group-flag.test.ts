@@ -11,7 +11,7 @@ vi.mock('@clack/prompts', () => {
   const record = (...a: unknown[]) => logged.push(a.join(' '));
   return {
     intro: noop,
-    outro: noop,
+    outro: record,
     note: noop,
     confirm: vi.fn().mockResolvedValue(true),
     cancel: noop,
@@ -191,5 +191,16 @@ describe('add --group', () => {
     expect(install).not.toHaveBeenCalled();
     expect(searchMultiselect).not.toHaveBeenCalled();
     expect(logged).toContain('Unknown groups: a, b');
+  });
+
+  it('mentions --group in the --list closing hint when the source has groups', async () => {
+    await expect(
+      runAdd([fixture], { list: true, agent: ['codex'], global: false })
+    ).rejects.toThrow('process.exit called');
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    expect(logged).toContain(
+      'Use --skill <name> or --group <name> to install specific skills or whole groups'
+    );
   });
 });
