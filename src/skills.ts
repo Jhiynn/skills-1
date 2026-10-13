@@ -3,7 +3,7 @@ import { join, basename, dirname, resolve, normalize, sep, relative } from 'path
 import { parseFrontmatter } from './frontmatter.ts';
 import { sanitizeMetadata, stripTerminalEscapes } from './sanitize.ts';
 import type { Skill } from './types.ts';
-import { getPluginSkillPaths, getPluginGroupings } from './plugin-manifest.ts';
+import { getPluginSkillPaths, getPluginGroupings, appendPluginName } from './plugin-manifest.ts';
 import { readLocalLock } from './local-lock.ts';
 import { DEFAULT_SKILL_CONTAINER_DEPTH } from './constants.ts';
 
@@ -184,7 +184,7 @@ export async function discoverSkills(
 ): Promise<Skill[]> {
   const skills: Skill[] = [];
   // Kept skill per name; a later skill with the same name only adds its plugin groups.
-  const seenNames = new Map<string, Skill>();
+  const keptByName = new Map<string, Skill>();
   const parsedSkillPaths = new Set<string>();
   const localLock = await readLocalLock(basePath);
   const lockedSkillNames = new Set(Object.keys(localLock.skills).map(normalizeSkillName));
@@ -207,17 +207,20 @@ export async function discoverSkills(
     const pluginNames = pluginGroupings.get(resolve(skill.path));
     if (pluginNames) skill.pluginNames = [...pluginNames];
     skills.push(skill);
-    seenNames.set(skill.name, skill);
+    keptByName.set(skill.name, skill);
   };
 
-  // A skill whose name was already seen is dropped, but keeps its plugin
-  // groups on the skill that was kept, so it still shows under each of them.
-  const mergeDuplicateGroups = (skill: Skill) => {
-    const kept = seenNames.get(skill.name)!;
+  // A skill whose name was already kept is dropped, but its plugin groups move
+  // to the kept skill, so it still shows under each of them. Returns true if
+  // the skill was such a duplicate.
+  const mergeIntoKept = (skill: Skill): boolean => {
+    if (options?.includeDuplicateNames) return false;
+    const kept = keptByName.get(skill.name);
+    if (!kept) return false;
     for (const pluginName of pluginGroupings.get(resolve(skill.path)) ?? []) {
-      kept.pluginNames ??= [];
-      if (!kept.pluginNames.includes(pluginName)) kept.pluginNames.push(pluginName);
+      appendPluginName((kept.pluginNames ??= []), pluginName);
     }
+    return true;
   };
 
   const isInstalledProjectSkill = (skill: Skill): boolean => {
@@ -281,12 +284,7 @@ export async function discoverSkills(
   const tryAddSkillAt = async (skillDir: string): Promise<boolean> => {
     if (!(await hasSkillMd(skillDir))) return false;
     const skill = await parseSkillAt(skillDir);
-    if (!skill) return true;
-    if (!options?.includeDuplicateNames && seenNames.has(skill.name)) {
-      mergeDuplicateGroups(skill);
-      return true;
-    }
-    if (isInstalledProjectSkill(skill)) return true;
+    if (!skill || mergeIntoKept(skill) || isInstalledProjectSkill(skill)) return true;
     addSkill(skill);
     return true;
   };
@@ -323,12 +321,7 @@ export async function discoverSkills(
 
     for (const skillDir of allSkillDirs) {
       const skill = await parseSkillAt(skillDir);
-      if (!skill) continue;
-      if (!options?.includeDuplicateNames && seenNames.has(skill.name)) {
-        mergeDuplicateGroups(skill);
-      } else if (!isInstalledProjectSkill(skill)) {
-        addSkill(skill);
-      }
+      if (skill && !mergeIntoKept(skill) && !isInstalledProjectSkill(skill)) addSkill(skill);
     }
   }
 

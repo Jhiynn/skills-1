@@ -647,6 +647,11 @@ function logAutoSelectedSkills(entries: Array<{ label: string; description?: str
   if (only.description) p.log.message(pc.dim(only.description));
 }
 
+/** The plugin group a skill is recorded and summarized under: its first one. */
+function primaryPluginName(skill: Skill): string | undefined {
+  return skill.pluginNames?.[0];
+}
+
 async function handleWellKnownSkills(
   source: string,
   url: string,
@@ -1270,7 +1275,7 @@ async function installToTargets(
       results.push({
         skill: getSkillDisplayName(skill),
         agent: targetDisplayName(target),
-        pluginName: skill.pluginNames?.[0],
+        pluginName: primaryPluginName(skill),
         ...result,
       });
     }
@@ -2065,7 +2070,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
 
     for (const skill of selectedSkills) {
       // Summarize each skill once, under its first plugin group
-      const group = skill.pluginNames?.[0];
+      const group = primaryPluginName(skill);
       if (group) {
         if (!groupedSummary[group]) groupedSummary[group] = [];
         groupedSummary[group].push(skill);
@@ -2278,7 +2283,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
               ref: parsed.ref,
               skillPath: skillPathValue,
               skillFolderHash,
-              pluginName: skill.pluginNames?.[0],
+              pluginName: primaryPluginName(skill),
             });
           } catch {
             // Don't fail installation if lock file update fails

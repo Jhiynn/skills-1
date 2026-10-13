@@ -111,6 +111,11 @@ export async function getPluginSkillPaths(basePath: string): Promise<string[]> {
   return searchDirs;
 }
 
+/** Add a plugin name to a skill's group list unless it is already there. */
+export function appendPluginName(names: string[], pluginName: string): void {
+  if (!names.includes(pluginName)) names.push(pluginName);
+}
+
 /**
  * Get a map of skill directory paths to plugin names from plugin manifests.
  * This allows grouping skills by their parent plugins. A skill listed by
@@ -124,7 +129,7 @@ export async function getPluginGroupings(basePath: string): Promise<Map<string, 
     // Store absolute path as key for reliable matching
     const key = resolve(skillDir);
     const names = groupings.get(key) ?? [];
-    if (!names.includes(pluginName)) names.push(pluginName);
+    appendPluginName(names, pluginName);
     groupings.set(key, names);
   };
 
