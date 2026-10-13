@@ -1848,6 +1848,8 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       const hasGroups = entries.some((e) => e.group);
 
       // Too many rows to see at once: pick groups first, then skills within them.
+      // This counts prompt rows, not distinct skills: a skill in two groups
+      // takes two rows, and the question is whether the list would fit.
       // `null` stands for skills that belong to no group ("Other").
       const groupKeys = [...new Set(entries.map((e) => e.group ?? null))].sort((a, b) =>
         a === null ? 1 : b === null ? -1 : a.localeCompare(b)

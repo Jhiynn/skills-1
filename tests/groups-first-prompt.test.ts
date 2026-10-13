@@ -76,6 +76,30 @@ async function writeFixture(repo: string, perPlugin: number): Promise<void> {
   );
 }
 
+/** Fixture repo from plugin name to skill names, plus skills in no plugin. */
+async function writeRepo(
+  repo: string,
+  plugins: Record<string, string[]>,
+  loose: string[] = []
+): Promise<void> {
+  const all = new Set([...Object.values(plugins).flat(), ...loose]);
+  for (const name of all) await writeSkill(join(repo, 'skills', name), name);
+  await mkdir(join(repo, '.claude-plugin'), { recursive: true });
+  await writeFile(
+    join(repo, '.claude-plugin/marketplace.json'),
+    JSON.stringify({
+      plugins: Object.entries(plugins).map(([name, skills]) => ({
+        name,
+        source: './',
+        skills: skills.map((n) => `./skills/${n}`),
+      })),
+    })
+  );
+}
+
+const numbered = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => `${prefix}${String(i + 1).padStart(2, '0')}`);
+
 type PromptArgs = Parameters<typeof searchMultiselect>[0];
 const promptCalls = () =>
   vi.mocked(searchMultiselect).mock.calls.map(([args]) => args as PromptArgs);
@@ -194,6 +218,38 @@ describe('groups-first skill prompt', () => {
     const step = skillPrompt()!;
     expect(step.items).toHaveLength(19);
     expect(step.initialSelected).toBeUndefined();
+  });
+
+  it('keeps the single skill prompt at exactly 20 rows', async () => {
+    await writeRepo(fixture, { alpha: numbered('a', 10), beta: numbered('b', 10) });
+    answer([]);
+
+    await run();
+
+    expect(groupPrompt()).toBeUndefined();
+    expect(skillPrompt()!.items).toHaveLength(20);
+  });
+
+  it('asks for groups at 21 rows', async () => {
+    await writeRepo(fixture, { alpha: numbered('a', 10), beta: numbered('b', 10) }, ['loose']);
+    answer(['Alpha']);
+
+    await run();
+
+    expect(groupPrompt()).toBeDefined();
+  });
+
+  it('counts a skill once per group it shows under', async () => {
+    // 19 distinct skills, but s1 and s2 show under both groups: 21 rows
+    await writeRepo(fixture, {
+      alpha: [...numbered('a', 9), 's1', 's2'],
+      beta: [...numbered('b', 8), 's1', 's2'],
+    });
+    answer(['Alpha']);
+
+    await run();
+
+    expect(groupPrompt()).toBeDefined();
   });
 
   it('keeps the single skill prompt when there is only one group', async () => {
