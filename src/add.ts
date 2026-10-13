@@ -569,6 +569,11 @@ export interface AddOptions {
   agent?: string[];
   yes?: boolean;
   skill?: string[];
+  /**
+   * Plugin groups to install whole. Values are plugin names from the manifest
+   * (or the title-cased form the prompt shows); combines with `skill` as a union.
+   */
+  group?: string[];
   /** Valid JSON to attach to the install telemetry event. */
   metadata?: string;
   list?: boolean;
@@ -652,6 +657,31 @@ function primaryPluginName(skill: Skill): string | undefined {
   return skill.pluginNames?.[0];
 }
 
+/** Lowercased kebab form, so `Document Skills` (as the prompt shows it) matches `document-skills`. */
+function normalizeGroupName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+/**
+ * Skills whose plugin groups include any requested group. Requested names that
+ * match no group are returned in `unknown`; `available` lists every group name.
+ */
+function findSkillsInGroups(
+  skills: Skill[],
+  requested: string[]
+): { matched: Skill[]; unknown: string[]; available: string[] } {
+  const available = [...new Set(skills.flatMap((s) => s.pluginNames ?? []))].sort();
+  const wanted = new Set<string>();
+  const unknown: string[] = [];
+  for (const name of requested) {
+    const group = available.find((g) => normalizeGroupName(g) === normalizeGroupName(name));
+    if (group) wanted.add(group);
+    else unknown.push(name);
+  }
+  const matched = skills.filter((s) => s.pluginNames?.some((g) => wanted.has(g)));
+  return { matched, unknown, available };
+}
+
 async function handleWellKnownSkills(
   source: string,
   url: string,
@@ -705,6 +735,12 @@ async function handleWellKnownSkills(
     console.log();
     p.outro('Run without --list to install');
     process.exit(0);
+  }
+
+  if (options.group?.length) {
+    p.log.error(`Unknown group: ${options.group.join(', ')}`);
+    p.log.info('This source defines no plugin groups.');
+    process.exit(1);
   }
 
   // Filter skills if --skill option is provided
@@ -1714,32 +1750,56 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
       // --skill '*' selects all skills
       selectedSkills = skills;
       logChosen(selectedSkills);
-    } else if (options.skill && options.skill.length > 0) {
-      selectedSkills = filterSkills(skills, options.skill);
+    } else if (options.skill?.length || options.group?.length) {
+      // --group and --skill combine as a union, kept in discovery order.
+      const chosen = new Set<Skill>();
 
-      // Requested names that matched nothing are reported as skipped entries.
-      if (jsonMode) {
-        for (const requested of options.skill) {
-          if (filterSkills(skills, [requested]).length === 0) {
-            jsonResults.push({
-              name: requested,
-              status: 'skipped',
-              reason: 'No matching skill found in source',
-            });
+      if (options.group?.length) {
+        const { matched, unknown, available } = findSkillsInGroups(skills, options.group);
+        if (unknown.length > 0) {
+          const message = `Unknown group${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`;
+          p.log.error(message);
+          if (available.length > 0) {
+            p.log.info('Available groups:');
+            for (const group of available) p.log.message(`  - ${group}`);
+          } else {
+            p.log.info('This source defines no plugin groups.');
+          }
+          await cleanup(tempDir);
+          emitJsonAndExit(1, `${message}. Available groups: ${available.join(', ') || 'none'}`);
+        }
+        for (const skill of matched) chosen.add(skill);
+      }
+
+      if (options.skill?.length) {
+        const bySkill = filterSkills(skills, options.skill);
+
+        // Requested names that matched nothing are reported as skipped entries.
+        if (jsonMode) {
+          for (const requested of options.skill) {
+            if (filterSkills(skills, [requested]).length === 0) {
+              jsonResults.push({
+                name: requested,
+                status: 'skipped',
+                reason: 'No matching skill found in source',
+              });
+            }
           }
         }
-      }
 
-      if (selectedSkills.length === 0) {
-        p.log.error(`No matching skills found for: ${options.skill.join(', ')}`);
-        p.log.info('Available skills:');
-        for (const s of skills) {
-          p.log.message(`  - ${getSkillDisplayName(s)}`);
+        if (bySkill.length === 0) {
+          p.log.error(`No matching skills found for: ${options.skill.join(', ')}`);
+          p.log.info('Available skills:');
+          for (const s of skills) {
+            p.log.message(`  - ${getSkillDisplayName(s)}`);
+          }
+          await cleanup(tempDir);
+          emitJsonAndExit(1, `No matching skills found for: ${options.skill.join(', ')}`);
         }
-        await cleanup(tempDir);
-        emitJsonAndExit(1, `No matching skills found for: ${options.skill.join(', ')}`);
+        for (const skill of bySkill) chosen.add(skill);
       }
 
+      selectedSkills = skills.filter((skill) => chosen.has(skill));
       p.log.info(
         `Selected ${selectedSkills.length} skill${selectedSkills.length !== 1 ? 's' : ''}: ${selectedSkills.map((s) => pc.cyan(getSkillDisplayName(s))).join(', ')}`
       );
@@ -2622,6 +2682,16 @@ export function parseAddOptions(args: string[]): {
       let nextArg = args[i];
       while (i < args.length && nextArg && !nextArg.startsWith('-')) {
         options.skill.push(nextArg);
+        i++;
+        nextArg = args[i];
+      }
+      i--; // Back up one since the loop will increment
+    } else if (arg === '--group') {
+      options.group = options.group || [];
+      i++;
+      let nextArg = args[i];
+      while (i < args.length && nextArg && !nextArg.startsWith('-')) {
+        options.group.push(...nextArg.split(',').filter(Boolean));
         i++;
         nextArg = args[i];
       }
