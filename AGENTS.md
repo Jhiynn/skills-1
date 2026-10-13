@@ -60,6 +60,7 @@ src/
 └── test-utils.ts    # Test utilities
 
 tests/
+├── add-group-flag.test.ts       # add --group (install whole plugin groups)
 ├── cross-platform-paths.test.ts # Path normalization across platforms
 ├── full-depth-discovery.test.ts # --full-depth skill discovery tests
 ├── openclaw-paths.test.ts       # OpenClaw-specific path tests
